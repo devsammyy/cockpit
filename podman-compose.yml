@@ -1,0 +1,49 @@
+name: qwen-autopilot
+
+services:
+  postgres:
+    image: docker.io/library/postgres:18-alpine
+    container_name: qwen-autopilot-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-autopilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local-only}
+      POSTGRES_USER: ${POSTGRES_USER:-autopilot}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - autopilot-internal
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql:Z
+
+  redis:
+    image: docker.io/library/redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    container_name: qwen-autopilot-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - autopilot-internal
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data:Z
+
+networks:
+  autopilot-internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:

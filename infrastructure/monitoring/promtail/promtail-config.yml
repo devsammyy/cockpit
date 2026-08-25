@@ -1,0 +1,45 @@
+# ─── Promtail Configuration ───
+# Discovers all containers via the Docker socket and ships their logs to Loki
+# labelled by container/compose service. The backend emits structured pino
+# JSON, so request IDs and levels are extracted for correlation queries.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /positions/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    relabel_configs:
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: service
+    pipeline_stages:
+      # Backend logs are pino JSON: extract level and request id for querying
+      - match:
+          selector: '{service="backend"}'
+          stages:
+            - json:
+                expressions:
+                  level: level
+                  requestId: req.id
+            - labels:
+                level:
+      # Nginx access logs are JSON: extract status and request id
+      - match:
+          selector: '{service="nginx"}'
+          stages:
+            - json:
+                expressions:
+                  status: status
+                  request_id: request_id

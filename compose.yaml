@@ -1,0 +1,129 @@
+name: qwen-autopilot-dev
+
+services:
+  # ── Database Service ──
+  database:
+    image: docker.io/library/postgres:18-alpine
+    container_name: qwen-autopilot-dev-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-autopilot}
+      POSTGRES_USER: ${DB_USER:-autopilot}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me-local-only}
+    ports:
+      - "${POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - dev-postgres-data:/var/lib/postgresql:Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autopilot-net
+    restart: unless-stopped
+
+  # ── Redis Cache Service ──
+  redis:
+    image: docker.io/library/redis:8-alpine
+    container_name: qwen-autopilot-dev-redis
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    volumes:
+      - dev-redis-data:/data:Z
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autopilot-net
+    restart: unless-stopped
+
+  # ── Backend Service ──
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile.dev
+    container_name: qwen-autopilot-dev-backend
+    environment:
+      NODE_ENV: development
+      # Non-interactive container: let pnpm rebuild node_modules without a TTY prompt.
+      CI: "true"
+      PORT: ${BACKEND_PORT:-4000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://autopilot:change-me-local-only@database:5432/autopilot?schema=public}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      # Inside the compose network redis always listens on its container port 6379.
+      # REDIS_PORT (host-side, e.g. 16379) only drives the redis service's published
+      # port mapping — it must NOT be used for this in-network connection.
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      JWT_ACCESS_TOKEN_SECRET: ${JWT_ACCESS_TOKEN_SECRET:-replace-with-a-secure-development-secret-for-jwt-signing}
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-15m}
+      JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL:-7d}
+      QWEN_API_KEY: ${QWEN_API_KEY}
+      QWEN_API_URL: ${QWEN_API_URL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-12345678901234567890123456789012}
+      SEED_ADMIN: ${SEED_ADMIN:-true}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+      ADMIN_DISPLAY_NAME: ${ADMIN_DISPLAY_NAME:-"System Administrator"}
+    ports:
+      - "${BACKEND_PORT:-4000}:${BACKEND_PORT:-4000}"
+    volumes:
+      - .:/app:Z
+      - /app/node_modules
+      - /app/apps/backend/node_modules
+      - /app/apps/frontend/node_modules
+      - /app/packages/shared-types/node_modules
+      - /app/packages/shared-utils/node_modules
+      - /app/packages/ui/node_modules
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/app/scripts/entrypoint.dev.sh"]
+    networks:
+      - autopilot-net
+    restart: unless-stopped
+
+  # ── Frontend Service ──
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile.dev
+    container_name: qwen-autopilot-dev-frontend
+    environment:
+      NODE_ENV: development
+      # Non-interactive container: let pnpm rebuild node_modules without a TTY prompt.
+      CI: "true"
+      PORT: ${FRONTEND_PORT:-3000}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000/api/v1}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-"Qwen Autopilot"}
+    ports:
+      - "${FRONTEND_PORT:-3000}:${FRONTEND_PORT:-3000}"
+    volumes:
+      - .:/app:Z
+      - /app/node_modules
+      - /app/apps/backend/node_modules
+      - /app/apps/frontend/node_modules
+      - /app/packages/shared-types/node_modules
+      - /app/packages/shared-utils/node_modules
+      - /app/packages/ui/node_modules
+    depends_on:
+      backend:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/app/scripts/entrypoint.frontend.dev.sh"]
+    networks:
+      - autopilot-net
+    restart: unless-stopped
+
+networks:
+  autopilot-net:
+    driver: bridge
+
+volumes:
+  dev-postgres-data:
+    driver: local
+  dev-redis-data:
+    driver: local

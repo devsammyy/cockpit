@@ -1,0 +1,168 @@
+# ─── Monitoring & Log Aggregation Overlay ───
+# Prometheus (metrics) + Grafana (dashboards) + Loki/Promtail (logs) + exporters.
+#
+# Runs alongside the production stack on the same internal network:
+#   docker compose -f docker-compose.production.yml -f docker-compose.monitoring.yml up -d
+#
+# Grafana is exposed through nginx at /grafana/ (see infrastructure/nginx).
+# Prometheus and the exporters are never exposed publicly.
+
+name: qwen-autopilot-production
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  # ── Metrics Collection ──
+  prometheus:
+    image: docker.io/prom/prometheus:v3.2.1
+    container_name: qwen-autopilot-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./infrastructure/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+      - ./infrastructure/monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro,Z
+      - prometheus-data:/prometheus
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # ── Dashboards ──
+  grafana:
+    image: docker.io/grafana/grafana:11.5.2
+    container_name: qwen-autopilot-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro,Z
+      - ./infrastructure/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ── Log Aggregation ──
+  loki:
+    image: docker.io/grafana/loki:3.4.2
+    container_name: qwen-autopilot-loki
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./infrastructure/monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro,Z
+      - loki-data:/loki
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # ── Log Shipper (container logs → Loki) ──
+  promtail:
+    image: docker.io/grafana/promtail:3.4.2
+    container_name: qwen-autopilot-promtail
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    volumes:
+      - ./infrastructure/monitoring/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro,Z
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail-positions:/positions
+    depends_on:
+      - loki
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ── Host Metrics ──
+  node-exporter:
+    image: docker.io/prom/node-exporter:v1.9.0
+    container_name: qwen-autopilot-node-exporter
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - /:/host:ro,rslave
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    pid: host
+
+  # ── Container Metrics ──
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: qwen-autopilot-cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ── PostgreSQL Metrics ──
+  postgres-exporter:
+    image: docker.io/prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: qwen-autopilot-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-autopilot}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-autopilot}?sslmode=disable"
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ── Redis Metrics ──
+  redis-exporter:
+    image: docker.io/oliver006/redis_exporter:v1.67.0
+    container_name: qwen-autopilot-redis-exporter
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  loki-data:
+    driver: local
+  promtail-positions:
+    driver: local

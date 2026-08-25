@@ -1,0 +1,26 @@
+# ─── Docker Build Context Exclusions ───
+# Minimize build context for faster container builds
+
+node_modules
+.git
+.gitignore
+.github
+.husky
+.vscode
+.editorconfig
+.prettierrc.json
+.prettierignore
+*.md
+!README.md
+docs
+infrastructure/nginx/ssl/*.key
+infrastructure/nginx/ssl/*.crt
+*.log
+coverage
+.env
+.env.*
+!.env.example
+dist
+.next
+apps/frontend/.next
+apps/backend/dist

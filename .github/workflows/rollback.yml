@@ -1,0 +1,49 @@
+# ─── GitHub Actions: Rollback / Redeploy ───
+# Manually deploy any previously built image tag (git SHA from CI or vX.Y.Z
+# from a release) to production. This is the one-click rollback path: pick the
+# last known-good tag and run.
+name: Rollback / Redeploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (git SHA or release version, e.g. v1.2.3)"
+        required: true
+        type: string
+
+env:
+  ACR_REGISTRY: registry.ap-southeast-1.aliyuncs.com
+
+jobs:
+  rollback:
+    name: Deploy pinned tag ${{ inputs.image_tag }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Redeploy tag on ECS via SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.ECS_HOST }}
+          username: ${{ secrets.ECS_USERNAME }}
+          key: ${{ secrets.ECS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/qwen-autopilot
+
+            docker login \
+              --username=${{ secrets.ACR_USERNAME }} \
+              --password=${{ secrets.ACR_PASSWORD }} \
+              ${{ env.ACR_REGISTRY }}
+
+            grep -q '^IMAGE_TAG=' .env \
+              && sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=${{ inputs.image_tag }}/' .env \
+              || echo 'IMAGE_TAG=${{ inputs.image_tag }}' >> .env
+
+            docker compose -f docker-compose.production.yml pull backend frontend
+            docker compose -f docker-compose.production.yml up -d --remove-orphans
+
+            sleep 20
+            curl -f http://localhost/health
+            curl -f http://localhost/api/v1/health/ready
+            echo "✅ Rollback to ${{ inputs.image_tag }} verified"

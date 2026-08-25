@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.next/
+.turbo/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+!apps/backend/.env.example
+!apps/frontend/.env.example
+!infrastructure/.env.example
+*.log
+pnpm-debug.log*
+.pnpm-store/
+docs/submission/*

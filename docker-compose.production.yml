@@ -1,0 +1,209 @@
+# ─── Production Docker Compose ───
+# Full-stack deployment targeting Alibaba Cloud ECS.
+# Compatible with Docker and Podman runtimes.
+#
+# Images are pulled from Alibaba Cloud Container Registry (ACR) and pinned via
+# IMAGE_TAG (git SHA or release version) so deployments and rollbacks are
+# reproducible. `build:` remains as a fallback for building directly on the
+# host (`docker compose -f docker-compose.production.yml up -d --build`).
+#
+# Combine with the monitoring overlay for the full observability stack:
+#   docker compose -f docker-compose.production.yml -f docker-compose.monitoring.yml up -d
+
+name: qwen-autopilot-production
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  # ── Reverse Proxy & TLS Termination ──
+  nginx:
+    image: docker.io/library/nginx:1.27-alpine
+    container_name: qwen-autopilot-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro,Z
+      - ./infrastructure/nginx/ssl:/etc/nginx/ssl:ro,Z
+      - certbot-webroot:/var/www/certbot:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks:
+      - autopilot-public
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Backend API ──
+  backend:
+    image: ${ACR_REGISTRY:-registry.ap-southeast-1.aliyuncs.com}/${ACR_NAMESPACE:-qwen-autopilot}/backend:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: qwen-autopilot-backend
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      APP_VERSION: "${IMAGE_TAG:-latest}"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-autopilot}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-autopilot}?schema=public&connection_limit=20&pool_timeout=30"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+      JWT_ACCESS_TOKEN_SECRET: "${JWT_ACCESS_TOKEN_SECRET:?JWT_ACCESS_TOKEN_SECRET is required}"
+      JWT_ACCESS_TOKEN_TTL: "${JWT_ACCESS_TOKEN_TTL:-15m}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-https://localhost}"
+      QWEN_API_KEY: "${QWEN_API_KEY:?QWEN_API_KEY is required}"
+      QWEN_API_URL: "${QWEN_API_URL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}"
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY is required}"
+      METRICS_ENABLED: "${METRICS_ENABLED:-true}"
+      OTEL_ENABLED: "${OTEL_ENABLED:-false}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      OTEL_SERVICE_NAME: qwen-autopilot-api
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/v1/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+  # ── Frontend ──
+  frontend:
+    image: ${ACR_REGISTRY:-registry.ap-southeast-1.aliyuncs.com}/${ACR_NAMESPACE:-qwen-autopilot}/frontend:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    container_name: qwen-autopilot-frontend
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  # ── PostgreSQL (self-hosted; swap DATABASE_URL for ApsaraDB RDS to go managed) ──
+  postgres:
+    image: docker.io/library/postgres:18-alpine
+    container_name: qwen-autopilot-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-autopilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: ${POSTGRES_USER:-autopilot}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "log_min_duration_statement=1000"
+      - "-c"
+      - "log_statement=ddl"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - postgres-data:/var/lib/postgresql:Z
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+
+  # ── Redis (self-hosted; swap REDIS_HOST for Tair/ApsaraDB Redis to go managed) ──
+  redis:
+    image: docker.io/library/redis:8-alpine
+    container_name: qwen-autopilot-redis
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "noeviction"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - autopilot-internal
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - redis-data:/data:Z
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+networks:
+  autopilot-public:
+    driver: bridge
+  autopilot-internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  certbot-webroot:
+    driver: local

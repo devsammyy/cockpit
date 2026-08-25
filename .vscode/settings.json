@@ -1,0 +1,15 @@
+{
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.workingDirectories": [
+    { "directory": "apps/backend", "changeProcessCWD": true },
+    { "directory": "apps/frontend", "changeProcessCWD": true },
+    { "directory": "packages/shared-types", "changeProcessCWD": true },
+    { "directory": "packages/shared-utils", "changeProcessCWD": true },
+    { "directory": "packages/ui", "changeProcessCWD": true }
+  ],
+  "typescript.tsdk": "node_modules/typescript/lib"
+}

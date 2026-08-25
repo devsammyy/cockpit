@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "declaration": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "incremental": true,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist",
+    "paths": {
+      "@/*": ["src/*"],
+      "@qwen-autopilot/shared-types": ["../../packages/shared-types/src/index.ts"],
+      "@qwen-autopilot/shared-utils": ["../../packages/shared-utils/src/index.ts"]
+    },
+    "sourceMap": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "prisma/**/*.ts",
+    "test/**/*.ts",
+    "jest.config.ts",
+    "prisma.config.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}

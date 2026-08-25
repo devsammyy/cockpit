@@ -1,0 +1,116 @@
+# ─── Alibaba Cloud Services Integration Guide ───
+# This file documents every Alibaba Cloud service used by the Qwen Autopilot platform
+# Required for hackathon judging evidence
+
+## Overview
+# The Qwen Autopilot platform leverages the following Alibaba Cloud services:
+
+services:
+  # ── 1. Qwen Cloud (DashScope) ──
+  # Primary AI inference provider for all autonomous workflow planning
+  qwen_dashscope:
+    service: "Model Studio / DashScope"
+    region: "international"
+    endpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    usage:
+      - "LLM inference for goal interpretation and task planning"
+      - "Structured output generation for workflow DAG construction"
+      - "Agent runtime conversational inference"
+    models:
+      - "qwen-max"
+      - "qwen-plus"
+      - "qwen-turbo"
+    integration_files:
+      - "apps/backend/src/modules/ai-provider/qwen-provider.service.ts"
+      - "apps/backend/src/modules/ai-provider/ai-provider-manager.service.ts"
+
+  # ── 2. Elastic Compute Service (ECS) ──
+  # Production application hosting
+  ecs:
+    service: "Elastic Compute Service"
+    instance_type: "ecs.g7.xlarge"
+    region: "ap-southeast-1"
+    usage:
+      - "Hosts Docker containers for all platform services"
+      - "Runs Nginx reverse proxy, NestJS backend, Next.js frontend"
+      - "Manages PostgreSQL and Redis data services"
+    integration_files:
+      - "infrastructure/alibaba-cloud/deploy-ecs.sh"
+      - ".github/workflows/ci-cd.yml"
+
+  # ── 3. Container Registry (ACR) ──
+  # Docker image storage and distribution
+  acr:
+    service: "Alibaba Cloud Container Registry"
+    endpoint: "registry.ap-southeast-1.aliyuncs.com"
+    namespace: "qwen-autopilot"
+    usage:
+      - "Stores production Docker images for backend and frontend"
+      - "Provides image scanning and vulnerability detection"
+      - "Enables pinned-tag deployment and one-click rollback via image versioning"
+    integration_files:
+      - ".github/workflows/ci-cd.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/rollback.yml"
+      - "docker-compose.production.yml"
+      - "apps/backend/Dockerfile"
+      - "apps/frontend/Dockerfile"
+
+  # ── 4. Server Load Balancer (SLB) ──
+  # Traffic distribution and SSL termination (production-ready)
+  slb:
+    service: "Server Load Balancer"
+    usage:
+      - "Distributes traffic across ECS instances"
+      - "SSL/TLS termination"
+      - "Health check monitoring"
+    integration_files:
+      - "infrastructure/nginx/nginx.conf"
+
+  # ── 5. Object Storage Service (OSS) ──
+  # Off-host backup durability
+  oss:
+    service: "Object Storage Service"
+    usage:
+      - "Nightly database backup storage (backup-database.sh uploads via ossutil)"
+      - "Log archival target for Loki (s3-compatible storage_config)"
+      - "Static asset CDN origin"
+    integration_files:
+      - "infrastructure/scripts/backup-database.sh"
+      - "docs/operations/disaster-recovery.md"
+
+  # ── 6. Cloud Monitor ──
+  # Infrastructure and application monitoring
+  cloud_monitor:
+    service: "Cloud Monitor"
+    usage:
+      - "ECS instance CPU/memory/disk monitoring (agent preinstalled on ECS images)"
+      - "Complements the self-hosted Prometheus/Grafana stack in docker-compose.monitoring.yml"
+      - "Alert rules for service degradation"
+
+  # ── 7. ActionTrail ──
+  # API audit logging
+  actiontrail:
+    service: "ActionTrail"
+    usage:
+      - "Audit trail for all Alibaba Cloud API calls"
+      - "Compliance and security event logging"
+
+  # ── 8. Key Management Service (KMS) ──
+  # Secret and encryption key management (architecture-ready)
+  kms:
+    service: "Key Management Service"
+    usage:
+      - "Credential encryption key storage"
+      - "JWT secret rotation"
+      - "Database encryption keys"
+
+# ── Verification Evidence ──
+# Judges can verify Alibaba Cloud usage through:
+verification:
+  - "Qwen API calls visible in DashScope console usage dashboard"
+  - "ECS instance visible in Alibaba Cloud console"
+  - "ACR images visible in Container Registry console"
+  - "API endpoint responding at deployed ECS public IP"
+  - "GitHub Actions deployment logs showing ACR push and ECS SSH deploy"
+  - "Source code references to dashscope-intl.aliyuncs.com endpoints"
