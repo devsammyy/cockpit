@@ -61,6 +61,7 @@ export interface ToolDefinition {
 }
 
 export interface ChatOptions {
+  model?: string;
   temperature?: number;
   maxTokens?: number;
   topP?: number;
@@ -68,6 +69,11 @@ export interface ChatOptions {
   tools?: ToolDefinition[];
   toolChoice?: "auto" | "none" | { type: "string"; function: { name: string } };
   responseFormat?: { type: "text" | "json_object" };
+  // LiteLLM-specific
+  metadata?: Record<string, unknown>;
+  user?: string;
+  // Embedding-specific
+  embeddingModel?: string;
 }
 
 export interface TokenUsage {
@@ -80,6 +86,16 @@ export interface ChatResponse {
   message: ChatMessage;
   finishReason: string;
   usage?: TokenUsage;
+  // Provider-specific metadata
+  litellm?: {
+    cost: number;
+    model: string;
+    provider: string;
+  };
+  nim?: {
+    model: string;
+    provider: string;
+  };
 }
 
 export interface ChatResponseChunk {

@@ -40,6 +40,9 @@ jobs:
     name: TypeScript Type Check
     runs-on: ubuntu-latest
     needs: lint
+    env:
+      NEXT_PUBLIC_API_BASE_URL: "http://localhost:4000/api/v1"
+      NEXT_PUBLIC_APP_NAME: "Qwen Autopilot"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -59,6 +62,37 @@ jobs:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
     needs: lint
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qwen_autopilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/qwen_autopilot?schema=public"
+      REDIS_HOST: "localhost"
+      REDIS_PORT: "6379"
+      JWT_ACCESS_TOKEN_SECRET: "test-secret"
+      JWT_REFRESH_TOKEN_SECRET: "test-refresh-secret"
+      CREDENTIAL_ENCRYPTION_KEY: "test-encryption-key-32-chars-long"
+      QWEN_API_KEY: "test-key"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -70,7 +104,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @qwen-autopilot/backend db:generate
-      - run: pnpm --filter @qwen-autopilot/backend test -- --ci --coverage
+      - run: pnpm --filter @qwen-autopilot/backend db:migrate deploy
+      - run: pnpm --filter @qwen-autopilot/backend test -- --ci --coverage --coverageThreshold='{"global":{"branches":80,"functions":80,"lines":80,"statements":80}}'
+
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:

@@ -40,7 +40,6 @@ export class AiProviderManagerService {
     await this.checkQuota(orgId);
 
     const modelMeta = await this.modelRegistry.getModel(modelId);
-    const providerInstance = this.providerFactory.getProvider(modelMeta.provider);
 
     // Validate capability checks
     if (options.tools && options.tools.length > 0 && !modelMeta.supportsToolCalling) {
@@ -51,11 +50,16 @@ export class AiProviderManagerService {
 
     try {
       this.logger.log(`Invoking model ${modelId} for organization ${orgId}`);
-      const result = await providerInstance.chat(messages, {
-        ...restOptions,
-        // map model name dynamically from registry settings
-        maxTokens: restOptions.maxTokens ?? modelMeta.maxOutputTokens,
-      });
+
+      // Use provider factory with fallback support
+      const result = await this.providerFactory.executeWithFallback(
+        modelId,
+        (provider) =>
+          provider.chat(messages, {
+            ...restOptions,
+            maxTokens: restOptions.maxTokens ?? modelMeta.maxOutputTokens,
+          }),
+      );
 
       this.metrics?.recordAiRequest(modelId, "success", (Date.now() - startedAt) / 1000);
 
@@ -69,18 +73,14 @@ export class AiProviderManagerService {
     } catch (err) {
       this.metrics?.recordAiRequest(modelId, "error", (Date.now() - startedAt) / 1000);
       this.logger.warn(
-        `Execution on model ${modelId} failed. Triggering fallback configuration...`,
+        `Execution on model ${modelId} failed after all fallbacks: ${(err as Error).message}`,
       );
-      // Standard Fallback: retry using qwen-plus if current failed
-      if (modelId !== "qwen-plus") {
-        return this.chat(messages, { ...options, modelId: "qwen-plus" });
-      }
       throw err;
     }
   }
 
   /**
-   * Run streaming chat completions.
+   * Run streaming chat completions with fallback support.
    */
   async *stream(
     messages: ChatMessage[],
@@ -90,14 +90,19 @@ export class AiProviderManagerService {
     await this.checkQuota(orgId);
 
     const modelMeta = await this.modelRegistry.getModel(modelId);
-    const providerInstance = this.providerFactory.getProvider(modelMeta.provider);
 
     if (!modelMeta.supportsStreaming) {
       throw new BadRequestException(`Model ${modelId} does not support Streaming`);
     }
 
-    const generator = providerInstance.stream(messages, restOptions);
-    for await (const chunk of generator) {
+    const excludeProviders: string[] = [];
+
+    for await (const chunk of this.providerFactory.streamWithFallback(
+      modelId,
+      messages,
+      restOptions,
+      excludeProviders,
+    )) {
       if (chunk.usage) {
         await this.incrementQuota(orgId, chunk.usage.totalTokens);
       }
@@ -157,5 +162,29 @@ export class AiProviderManagerService {
     } catch {
       // Ignore database failures during test executions
     }
+  }
+
+  /**
+   * Get provider health status.
+   */
+  async getProviderHealth(): Promise<Record<string, { healthy: boolean; latency?: number; error?: string }>> {
+    return this.providerFactory.getHealthStatus();
+  }
+
+  /**
+   * Get available providers.
+   */
+  getProviders(): string[] {
+    return this.providerFactory.getProviderNames();
+  }
+
+  /**
+   * Get primary provider name.
+   */
+  getPrimaryProvider(): string {
+    const primary = this.providerFactory.getProviderConfig(
+      this.providerFactory.getProviderNames()[0] || "",
+    );
+    return primary?.name || "unknown";
   }
 }

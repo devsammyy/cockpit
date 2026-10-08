@@ -16,6 +16,13 @@ VSWITCH_ID="${ECS_VSWITCH_ID:?Set ECS_VSWITCH_ID}"
 KEY_PAIR_NAME="${ECS_KEY_PAIR:-qwen-autopilot-key}"
 INSTANCE_NAME="qwen-autopilot-prod"
 REPO_URL="${REPO_URL:-https://github.com/devsammyy/qwen_hack.git}"
+# Image tag to deploy (git SHA from CI or release version like v1.2.3)
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+ACR_REGISTRY="${ACR_REGISTRY:-registry.ap-southeast-1.aliyuncs.com}"
+ACR_NAMESPACE="${ACR_NAMESPACE:-qwen-autopilot}"
+# ACR credentials (required for pulling images)
+ACR_USERNAME="${ACR_USERNAME:?Set ACR_USERNAME}"
+ACR_PASSWORD="${ACR_PASSWORD:?Set ACR_PASSWORD}"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Qwen Autopilot — Alibaba Cloud ECS Deployment"
@@ -76,7 +83,14 @@ echo "  ✅ Public IP: ${PUBLIC_IP}"
 # ─── Step 5: Bootstrap Instance ───
 echo "[5/5] Bootstrapping instance (Docker, repo, secrets, stack, backups)..."
 ssh -o StrictHostKeyChecking=no -i ~/.ssh/"${KEY_PAIR_NAME}".pem root@"${PUBLIC_IP}" \
-  REPO_URL="${REPO_URL}" QWEN_API_KEY="${QWEN_API_KEY:-}" 'bash -s' << 'REMOTE_SCRIPT'
+  REPO_URL="${REPO_URL}" \
+  QWEN_API_KEY="${QWEN_API_KEY:-}" \
+  IMAGE_TAG="${IMAGE_TAG}" \
+  ACR_REGISTRY="${ACR_REGISTRY}" \
+  ACR_NAMESPACE="${ACR_NAMESPACE}" \
+  ACR_USERNAME="${ACR_USERNAME}" \
+  ACR_PASSWORD="${ACR_PASSWORD}" \
+  'bash -s' << 'REMOTE_SCRIPT'
 set -euo pipefail
 
 # Install Docker
@@ -104,12 +118,22 @@ if [ ! -f .env ]; then
   if [ -n "${QWEN_API_KEY:-}" ]; then
     sed -i "s|^QWEN_API_KEY=.*|QWEN_API_KEY=${QWEN_API_KEY}|" .env
   fi
+  # Set image tag for pinned deployment
+  sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" .env
   chmod 600 .env
   echo "Generated .env — review QWEN_API_KEY and CORS_ORIGINS before go-live"
 fi
 
-# Deploy application + monitoring stack (build locally on first boot)
-docker compose -f docker-compose.production.yml -f docker-compose.monitoring.yml up -d --build
+# Login to ACR
+docker login \
+  --username="${ACR_USERNAME}" \
+  --password="${ACR_PASSWORD}" \
+  "${ACR_REGISTRY}"
+
+# Deploy application + monitoring stack using pinned images from ACR
+export IMAGE_TAG ACR_REGISTRY ACR_NAMESPACE
+docker compose -f docker-compose.production.yml -f docker-compose.monitoring.yml pull backend frontend
+docker compose -f docker-compose.production.yml -f docker-compose.monitoring.yml up -d --remove-orphans
 
 # Install nightly backups + weekly restore verification
 ./infrastructure/scripts/install-backup-cron.sh

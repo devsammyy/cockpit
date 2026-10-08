@@ -49,7 +49,7 @@ services:
       NODE_ENV: development
       # Non-interactive container: let pnpm rebuild node_modules without a TTY prompt.
       CI: "true"
-      PORT: ${BACKEND_PORT:-4000}
+      PORT: ${BACKEND_PORT:-4001}
       DATABASE_URL: ${DATABASE_URL:-postgresql://autopilot:change-me-local-only@database:5432/autopilot?schema=public}
       REDIS_HOST: ${REDIS_HOST:-redis}
       # Inside the compose network redis always listens on its container port 6379.
@@ -60,7 +60,7 @@ services:
       JWT_ACCESS_TOKEN_SECRET: ${JWT_ACCESS_TOKEN_SECRET:-replace-with-a-secure-development-secret-for-jwt-signing}
       JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-15m}
       JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL:-7d}
-      QWEN_API_KEY: ${QWEN_API_KEY}
+      QWEN_API_KEY: ${QWEN_API_KEY:-mock-key}
       QWEN_API_URL: ${QWEN_API_URL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-12345678901234567890123456789012}
       SEED_ADMIN: ${SEED_ADMIN:-true}
@@ -68,7 +68,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
       ADMIN_DISPLAY_NAME: ${ADMIN_DISPLAY_NAME:-"System Administrator"}
     ports:
-      - "${BACKEND_PORT:-4000}:${BACKEND_PORT:-4000}"
+      - "${BACKEND_PORT:-4001}:${BACKEND_PORT:-4001}"
     volumes:
       - .:/app:Z
       - /app/node_modules
@@ -98,7 +98,7 @@ services:
       # Non-interactive container: let pnpm rebuild node_modules without a TTY prompt.
       CI: "true"
       PORT: ${FRONTEND_PORT:-3000}
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000/api/v1}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4001/api/v1}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-"Qwen Autopilot"}
     ports:
       - "${FRONTEND_PORT:-3000}:${FRONTEND_PORT:-3000}"

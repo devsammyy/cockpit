@@ -27,8 +27,43 @@ const environmentSchema = z.object({
   REDIS_HOST: z.string().default("localhost"),
   REDIS_PASSWORD: z.string().optional().default(""),
   REDIS_PORT: z.coerce.number().int().min(1).max(65535).default(6379),
+
+  // ── Qwen / DashScope (Legacy / Default) ──
   QWEN_API_KEY: z.string().default("mock-key"),
-  QWEN_API_URL: z.string().default("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+  QWEN_API_URL: z.string().default("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+
+  // ── OpenAI ──
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_API_URL: z.string().optional().default("https://api.openai.com/v1"),
+  OPENAI_ORG_ID: z.string().optional(),
+
+  // ── Anthropic (via LiteLLM or proxy) ──
+  ANTHROPIC_API_KEY: z.string().optional(),
+
+  // ── LiteLLM ──
+  LITELLM_BASE_URL: z.string().optional(),
+  LITELLM_API_URL: z.string().optional(),
+  LITELLM_API_KEY: z.string().optional(),
+  LITELLM_VIRTUAL_KEY: z.string().optional(),
+  LITELLM_TEAM_ID: z.string().optional(),
+  LITELLM_FALLBACK_MODELS: z.string().optional(),
+
+  // ── NVIDIA NIM ──
+  NIM_BASE_URL: z.string().optional(),
+  NIM_API_KEY: z.string().optional(),
+  NGC_API_KEY: z.string().optional(),
+  NIM_MODEL_REPOSITORY: z.string().optional(),
+  NIM_ENABLE_PROFILING: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+
+  // ── Custom Providers (OpenAI-compatible) ──
+  // Configure via: CUSTOM_PROVIDER_<NAME>_URL, CUSTOM_PROVIDER_<NAME>_KEY, etc.
+  // Example: CUSTOM_PROVIDER_MYMODEL_URL=http://localhost:8000/v1
+  //          CUSTOM_PROVIDER_MYMODEL_KEY=my-key
+  //          CUSTOM_PROVIDER_MYMODEL_DEFAULT_MODEL=my-model
+  //          CUSTOM_PROVIDER_MYMODEL_PRIORITY=50
 });
 
 export type EnvironmentVariables = z.infer<typeof environmentSchema>;

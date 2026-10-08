@@ -17,6 +17,7 @@ Operators describe a goal in plain language (or pick a template), and the platfo
 - **Reliability engineering** — checkpointed executions, retries with backoff, timeouts, saga compensation (auto-undo), dead-execution recovery.
 - **Full observability** — per-execution tokens/cost/duration, event timeline, audit trail, Prometheus metrics, OpenTelemetry tracing.
 - **Multi-tenant SaaS** — organizations, RBAC permissions, JWT auth, per-org isolation on every query.
+- **Multi-provider AI** — pluggable AI provider framework supporting Qwen (DashScope), OpenAI, Anthropic, LiteLLM, NVIDIA NIM, and any OpenAI-compatible endpoint with automatic fallback chains.
 
 ## Documentation
 
@@ -43,7 +44,7 @@ Deep-dives: [docs/architecture.md](docs/architecture.md) and [docs/architecture/
 ## Judge testing instructions
 
 1. **Hosted demo** — URL provided on the Devpost submission. Sign in with the judge credentials listed there (or the seeded account below on a fresh deployment).
-2. **Run it locally in one command** — see [Getting Started](#getting-started) below (`make dev` brings up PostgreSQL, Redis, backend, and frontend, migrates and seeds automatically).
+2. **Run it locally in one command** — see [Getting Started](#getting-started) below (`make dev` brings up PostgreSQL, Redis, backend, and frontend, runs migrations, seeds the database, and starts dev servers).
 3. Sign in (`admin@example.com` / `ChangeMe123!` on seeded instances) → **Workflows** → _Seed enterprise templates_ → **Run** any template (e.g. _Resume Screening_): fill the generated input form (paste text or attach a file) → watch the live execution → decide the approval gate → inspect tokens/cost/output.
 4. **Autopilot trigger demo (no login required):** enable a webhook via `POST /api/v1/workflows/:id/triggers/webhook`, then fire it like a monitoring system: `curl -X POST <host>/api/v1/hooks/workflows/:id -H 'x-hook-token: <secret>' -d '{"alert":"CPU 97% on prod-db-1"}'` — an execution starts, diagnoses with Qwen, and pauses at the human approval gate.
 
@@ -62,52 +63,105 @@ tests/load/       k6 load/smoke/stress suites
 
 ## Getting Started
 
-### Option A: Containerized Development (Recommended & Plug-and-Play)
+We provide two easy ways to run the system locally.
 
-The project includes a fully containerized local stack using Docker or Podman Compose. It automatically provisions the PostgreSQL database, Redis cache, applies Prisma migrations, seeds the database with a default admin account, and launches backend/frontend dev servers with live reload/watch mode.
+### Containerized Development (recommended)
 
-#### 1. Setup Environment
+The `make dev` target brings up a container stack that includes PostgreSQL, Redis, the NestJS backend, and the Next.js frontend. It runs migrations, seeds the database, and starts the dev servers with live reload. The target uses either Docker Compose or Podman Compose, whichever is available.
+
+#### 1. Prepare the environment
 
 ```bash
 cp .env.example .env
 ```
 
-_(Optionally edit the `.env` file to customize passwords or set your `QWEN_API_KEY` for DashScope AI workflow execution)._
+Edit the generated `.env` if you wish to change passwords or set `QWEN_API_KEY` for the DashScope AI provider.
 
-#### 2. Start the Stack
-
-Run the following command:
+#### 2. Spin up the stack
 
 ```bash
 make dev
 ```
 
-_(Windows users without `make` can run: `docker compose -f compose.yaml up --build` or `podman compose -f compose.yaml up --build`)_
+**Windows**: if you lack `make` you can run the equivalent Compose command directly:
 
-#### 3. Access Services
+```bash
+docker compose -f compose.yaml up --build
+```
 
-- **Frontend App**: [http://localhost:3000](http://localhost:3000)
-- **Backend API Docs (Swagger)**: [http://localhost:4000/docs](http://localhost:4000/docs)
-- **Backend API Health Check**: [http://localhost:4000/api/v1/health](http://localhost:4000/api/v1/health)
+or for Podman Compose:
 
-#### 4. Default Seeded Admin Credentials
+```bash
+podman compose -f compose.yaml up --build
+```
+
+The `compose.yaml` file is a **development** compose that starts the database, cache, backend, and frontend. Production uses `docker-compose.production.yml` together with `docker-compose.monitoring.yml`.
+
+#### 3. Access services
+
+- **Frontend**: [http://localhost:3000](http://localhost:3000)
+- **Backend API docs**: [http://localhost:4000/docs](http://localhost:4000/docs)
+- **Backend health** (ready endpoint): [http://localhost:4000/api/v1/health/ready](http://localhost:4000/api/v1/health/ready)
+- **Frontend health**: [http://localhost:3000/api/health](http://localhost:3000/api/health)
+
+#### 4. Default admin account
 
 - **Email**: `admin@example.com`
 - **Password**: `ChangeMe123!`
 
-#### 5. Stop and Clean Stack
-
-To stop the environment and completely clean the database volumes for a fresh state reset:
+#### 5. Tear down the stack
 
 ```bash
 make clean
 ```
 
+`make clean` stops Podman or Docker Compose and removes all volumes so the next start is fully fresh.
+
 ---
 
-### Option B: Manual Local Development
+## AI Provider Configuration
 
-If you prefer to run services bare-metal on your host:
+The platform includes a **pluggable AI provider framework** that supports multiple providers simultaneously with automatic fallback. Configure one or more providers in your `.env`:
+
+| Provider | Description | Key Environment Variables |
+|----------|-------------|---------------------------|
+| **Qwen (DashScope)** | Default provider for Alibaba Cloud Model Studio | `QWEN_API_KEY`, `QWEN_API_URL` |
+| **OpenAI** | Direct OpenAI API access | `OPENAI_API_KEY`, `OPENAI_API_URL` |
+| **LiteLLM** | Unified gateway for 100+ models (OpenAI, Anthropic, Cohere, Azure, Vertex, etc.) with routing, fallbacks, cost tracking | `LITELLM_BASE_URL`, `LITELLM_API_KEY`, `LITELLM_VIRTUAL_KEY`, `LITELLM_TEAM_ID`, `LITELLM_FALLBACK_MODELS` |
+| **NVIDIA NIM** | Optimized inference microservices for NVIDIA GPUs (Nemotron, Llama, Mixtral, etc.) | `NIM_BASE_URL`, `NIM_API_KEY`, `NGC_API_KEY`, `NIM_MODEL_REPOSITORY` |
+| **Custom** | Any OpenAI-compatible endpoint (vLLM, TGI, Ollama, custom proxies) | `CUSTOM_PROVIDER_<NAME>_URL`, `CUSTOM_PROVIDER_<NAME>_KEY`, `CUSTOM_PROVIDER_<NAME>_DEFAULT_MODEL` |
+
+**Provider Priority & Fallback:**
+- Providers are tried in priority order (highest priority first)
+- On failure, the system automatically falls back to the next provider
+- LiteLLM is recommended for production as it handles routing, fallbacks, and cost tracking internally
+
+**Example `.env` with multiple providers:**
+
+```bash
+# Primary: Qwen on DashScope
+QWEN_API_KEY=your-qwen-key
+QWEN_API_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+
+# Fallback: OpenAI
+OPENAI_API_KEY=your-openai-key
+
+# Advanced: LiteLLM gateway (recommended for production)
+LITELLM_BASE_URL=http://litellm-proxy:4000
+LITELLM_API_KEY=litellm-master-key
+LITELLM_FALLBACK_MODELS=gpt-4o,claude-3-5-sonnet,qwen-plus
+
+# NVIDIA NIM for optimized local inference
+NIM_BASE_URL=http://nim:8000/v1
+NIM_API_KEY=nim-api-key
+NIM_MODEL_REPOSITORY=nemotron-3-ultra
+```
+
+---
+
+### Manual Local Development
+
+If you prefer to run the services directly on your host instead of containers:
 
 ```bash
 cp .env.example .env
@@ -117,9 +171,19 @@ pnpm setup
 pnpm dev
 ```
 
-Frontend: `http://localhost:3000`
-Backend Swagger: `http://localhost:4000/docs`
-Backend health: `http://localhost:4000/api/v1/health`
+- **Frontend**: `http://localhost:3000`
+- **Backend docs**: `http://localhost:4000/docs`
+- **Backend health** (ready): `http://localhost:4000/api/v1/health/ready`
+
+## Development Commands
+
+### pnpm dev commands
+
+- **pnpm dev**: Runs `scripts/dev.sh`, which uses Podman Compose to bring up the database, Redis, backend, and frontend containers and then starts the dev servers with live reload.
+- **pnpm dev:infra**: Starts only the infrastructure containers (database, Redis, etc.) using Podman Compose.
+- **pnpm dev:apps**: Starts only the application dev servers (backend and frontend) using the local dev scripts.
+
+---
 
 ## Development Commands
 
