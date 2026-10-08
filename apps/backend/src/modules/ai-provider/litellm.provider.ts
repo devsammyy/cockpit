@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { EnvironmentVariables } from "../../config/env.schema";
 import {
@@ -9,16 +9,8 @@ import {
 } from "@qwen-autopilot/shared-types";
 import { LlmProvider } from "./llm-provider.interface";
 import { OpenAICompatibleProvider, OpenAICompatibleConfig } from "./openai-compatible.provider";
-import {
-  LlmError,
-  LlmAuthenticationError,
-  LlmRateLimitError,
-  LlmTimeoutError,
-  LlmModelUnavailableError,
-  LlmNetworkError,
-  LlmQuotaExhaustedError,
-  LlmContextOverflowError,
-} from "./errors";
+
+
 
 /**
  * LiteLLM-specific configuration.
@@ -292,7 +284,7 @@ export class LiteLLMProvider extends OpenAICompatibleProvider implements LlmProv
         method: "POST",
         headers: this.getLiteLLMHeaders(),
         body: JSON.stringify({
-          model: this.config.defaultModel || "text-embedding-3-small",
+          model: options?.embeddingModel || this.config.defaultModel || "text-embedding-3-small",
           input: inputs,
         }),
       });
@@ -332,7 +324,7 @@ export class LiteLLMProvider extends OpenAICompatibleProvider implements LlmProv
         throw new Error(`LiteLLM cost API failed: ${response.statusText}`);
       }
 
-      return response.json();
+      return await response.json();
     } catch (error) {
       this.logger.error("Failed to get LiteLLM cost report", error);
       throw error;

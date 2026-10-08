@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { EnvironmentVariables } from "../../config/env.schema";
 import {
@@ -9,16 +9,8 @@ import {
 } from "@qwen-autopilot/shared-types";
 import { LlmProvider } from "./llm-provider.interface";
 import { OpenAICompatibleProvider, OpenAICompatibleConfig } from "./openai-compatible.provider";
-import {
-  LlmError,
-  LlmAuthenticationError,
-  LlmRateLimitError,
-  LlmTimeoutError,
-  LlmModelUnavailableError,
-  LlmNetworkError,
-  LlmQuotaExhaustedError,
-  LlmContextOverflowError,
-} from "./errors";
+
+
 
 /**
  * NVIDIA NIM (NVIDIA Inference Microservices) configuration.
@@ -266,7 +258,7 @@ export class NIMProvider extends OpenAICompatibleProvider implements LlmProvider
         method: "POST",
         headers: this.getNIMHeaders(),
         body: JSON.stringify({
-          model: this.config.defaultModel || "nvidia/embedding-model",
+          model: options?.embeddingModel || this.config.defaultModel || "nvidia/embedding-model",
           input: inputs,
         }),
       });
@@ -302,7 +294,7 @@ export class NIMProvider extends OpenAICompatibleProvider implements LlmProvider
         throw new Error(`NIM health API failed: ${response.statusText}`);
       }
 
-      return response.json();
+      return await response.json();
     } catch (error) {
       this.logger.error("Failed to get NIM health", error);
       throw error;
@@ -328,7 +320,7 @@ export class NIMProvider extends OpenAICompatibleProvider implements LlmProvider
         throw new Error(`NIM models API failed: ${response.statusText}`);
       }
 
-      return response.json();
+      return await response.json();
     } catch (error) {
       this.logger.error("Failed to get NIM model info", error);
       throw error;
